@@ -1,0 +1,166 @@
+:root {
+  --bg: #0d0f14;
+  --panel: #15181f;
+  --border: #232733;
+  --text: #e7e9ee;
+  --muted: #8b91a1;
+  --accent: #7aa2ff;
+  --accent-strong: #4f7bff;
+  --danger: #ff7a7a;
+  --success: #66d9a4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-size: 14px;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"] {
+  background: #0a0c11;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+  width: 100%;
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+button {
+  background: var(--accent-strong);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--accent);
+}
+
+button:disabled {
+  background: #2a2f3b;
+  cursor: not-allowed;
+}
+
+.shell {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.row > * {
+  flex: 1;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
+  margin-top: 8px;
+}
+
+.success {
+  color: var(--success);
+  margin-top: 8px;
+}
+
+.feed-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.feed-item:last-child {
+  border-bottom: none;
+}
+
+.feed-item.new {
+  animation: highlight 1.2s ease;
+}
+
+@keyframes highlight {
+  from {
+    background-color: rgba(122, 162, 255, 0.18);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.h1 {
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+
+.label {
+  display: block;
+  color: var(--muted);
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.field {
+  margin-bottom: 12px;
+}
+
+.balance {
+  font-size: 30px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.linkish {
+  background: transparent;
+  color: var(--accent);
+  padding: 0;
+  font-size: 13px;
+}
+.linkish:hover {
+  text-decoration: underline;
+  background: transparent;
+}

@@ -1,0 +1,192 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  api,
+  ApiError,
+  FeedItem,
+  formatMoney,
+  MeResponse,
+  newRequestId,
+  TransferResult,
+} from "@/lib/api";
+import { openFeedStream, FeedEvent } from "@/lib/feedStream";
+
+export default function HomePage() {
+  const router = useRouter();
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [items, setItems] = useState<FeedItem[]>([]);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const [recipient, setRecipient] = useState("");
+  const [amount, setAmount] = useState("");
+  const [requestId, setRequestId] = useState<string>(() => newRequestId());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const seen = useRef<Set<string>>(new Set());
+
+  const loadMe = useCallback(async () => {
+    try {
+      const data = await api<MeResponse>("/users/me");
+      setMe(data);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) router.replace("/login");
+    }
+  }, [router]);
+
+  const loadFeed = useCallback(async () => {
+    try {
+      const data = await api<{ items: FeedItem[] }>("/feed");
+      setItems(data.items);
+      seen.current = new Set(
+        data.items.map(
+          (it) =>
+            `${it.created_at}|${it.sender_username}|${it.recipient_username}|${it.amount}`,
+        ),
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) router.replace("/login");
+    }
+  }, [router]);
+
+  useEffect(() => {
+    void loadMe();
+    void loadFeed();
+  }, [loadMe, loadFeed]);
+
+  useEffect(() => {
+    const close = openFeedStream((ev: FeedEvent) => {
+      const key = `${ev.created_at}|${ev.sender_username}|${ev.recipient_username}|${ev.amount}`;
+      if (seen.current.has(key)) return;
+      seen.current.add(key);
+      setItems((prev) => [
+        {
+          sender_username: ev.sender_username,
+          recipient_username: ev.recipient_username,
+          amount: ev.amount,
+          currency: ev.currency,
+          created_at: ev.created_at,
+        },
+        ...prev,
+      ]);
+      setHighlighted(ev.operation_id);
+      void loadMe();
+    });
+    return close;
+  }, [loadMe]);
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    if (!amount.trim()) {
+      setError("Enter an amount");
+      setBusy(false);
+      return;
+    }
+    try {
+      const result = await api<TransferResult>("/transfers", {
+        method: "POST",
+        idempotencyKey: requestId,
+        body: {
+          recipient_username: recipient,
+          amount: amount.trim(),
+          currency: "USD",
+        },
+      });
+      setInfo(
+        `Sent ${formatMoney(result.amount, result.currency)} to ${result.recipient_username}`,
+      );
+      setRecipient("");
+      setAmount("");
+      setRequestId(newRequestId());
+      void loadMe();
+    } catch (err) {
+      setError((err as Error).message || "Transfer failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logout() {
+    try {
+      await api("/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    }
+    router.replace("/login");
+  }
+
+  return (
+    <div className="shell">
+      <div className="panel">
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <div>
+            <div className="muted">Signed in as</div>
+            <div className="h1">{me?.username || "…"}</div>
+            <div className="balance">
+              {me ? formatMoney(me.balance, me.currency) : "—"}
+            </div>
+          </div>
+          <button className="linkish" onClick={logout}>
+            Log out
+          </button>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="h1">Send money</div>
+        <form onSubmit={send}>
+          <div className="row">
+            <div className="field" style={{ flex: 2 }}>
+              <label className="label">Recipient username</label>
+              <input
+                type="text"
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                placeholder="e.g. bob"
+              />
+            </div>
+            <div className="field" style={{ flex: 1 }}>
+              <label className="label">Amount (USD)</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+          </div>
+          <button type="submit" disabled={busy}>
+            {busy ? "Sending…" : "Send"}
+          </button>
+          {error && <div className="error">{error}</div>}
+          {info && <div className="success">{info}</div>}
+        </form>
+      </div>
+
+      <div className="panel">
+        <div className="h1">Global feed</div>
+        {items.length === 0 && (
+          <div className="muted">No transfers yet. Send one!</div>
+        )}
+        {items.map((it, idx) => (
+          <div
+            key={`${it.created_at}-${idx}`}
+            className={`feed-item${highlighted && idx === 0 ? " new" : ""}`}
+          >
+            <div>
+              <strong>{it.sender_username}</strong>
+              <span className="muted"> → </span>
+              <strong>{it.recipient_username}</strong>
+            </div>
+            <div>{formatMoney(it.amount, it.currency)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

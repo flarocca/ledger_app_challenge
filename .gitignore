@@ -1,0 +1,21 @@
+# Rust build artifacts
+target/
+
+# Node / Next.js build artifacts
+node_modules/
+.next/
+out/
+next-env.d.ts
+
+# Dotenv local overrides — committed templates live in .env.example
+.env
+.env.local
+.env.*.local
+
+# Runtime log files; the directory itself is kept via api/logs/.gitkeep
+api/logs/*
+!api/logs/.gitkeep
+
+# Editor / OS noise
+.DS_Store
+*.swp

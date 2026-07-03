@@ -70,6 +70,8 @@ export type MeResponse = {
 };
 
 export type FeedItem = {
+  id: number;
+  operation_id: string;
   sender_username: string;
   recipient_username: string;
   amount: string;
@@ -77,14 +79,24 @@ export type FeedItem = {
   created_at: string;
 };
 
+export type TransferLeg = {
+  action_id: number;
+  recipient_username: string;
+  amount: string;
+};
+
 export type TransferResult = {
   operation_id: string;
   sender_username: string;
+  sender_balance_after: string;
+  currency: string;
+  created_at: string;
+  transfers: TransferLeg[];
+};
+
+export type TransferRecipientInput = {
   recipient_username: string;
   amount: string;
-  currency: string;
-  sender_balance_after: string;
-  created_at: string;
 };
 
 export function newRequestId(): string {

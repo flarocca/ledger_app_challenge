@@ -1,0 +1,13 @@
+**/target
+**/node_modules
+**/.next
+**/out
+**/logs/*
+!**/logs/.gitkeep
+**/.env
+**/.env.local
+**/.env.*.local
+.git
+.gitignore
+.DS_Store
+*.swp

@@ -1,8 +1,7 @@
+use crate::models::Credentials;
 use serde::Deserialize;
 use utoipa::ToSchema;
 use validator::Validate;
-
-use crate::models::Credentials;
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct LoginRequest {

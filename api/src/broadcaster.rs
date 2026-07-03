@@ -3,29 +3,15 @@ use tokio::sync::broadcast;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::models::TransferResult;
-
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct FeedEvent {
+    pub id: i64,
     pub operation_id: Uuid,
     pub sender_username: String,
     pub recipient_username: String,
     pub amount: String,
     pub currency: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-impl From<&TransferResult> for FeedEvent {
-    fn from(r: &TransferResult) -> Self {
-        Self {
-            operation_id: r.operation_id,
-            sender_username: r.sender_username.clone(),
-            recipient_username: r.recipient_username.clone(),
-            amount: r.amount.to_decimal_string(),
-            currency: r.amount.currency.code.clone(),
-            created_at: r.created_at,
-        }
-    }
 }
 
 pub struct FeedBroadcaster {

@@ -5,9 +5,9 @@ use crate::error::ErrorDetail;
 use crate::handlers::auth::requests::LoginRequest;
 use crate::handlers::auth::responses::{LoginResponse, LogoutResponse};
 use crate::handlers::feed::responses::{FeedItem, FeedListResponse};
-use crate::handlers::transfers::requests::CreateTransferRequest;
-use crate::handlers::transfers::responses::TransferResponse;
-use crate::handlers::users::responses::{MeResponse, UserResponse};
+use crate::handlers::transfers::requests::{CreateTransferRequest, TransferRecipientRequest};
+use crate::handlers::transfers::responses::{TransferLegResponse, TransferResponse};
+use crate::handlers::users::responses::MeResponse;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -19,7 +19,6 @@ use crate::handlers::users::responses::{MeResponse, UserResponse};
     paths(
         crate::handlers::auth::post::login,
         crate::handlers::auth::post::logout,
-        crate::handlers::users::get::search,
         crate::handlers::users::get::me,
         crate::handlers::transfers::post::create,
         crate::handlers::feed::get::list,
@@ -30,10 +29,11 @@ use crate::handlers::users::responses::{MeResponse, UserResponse};
         LoginRequest,
         LoginResponse,
         LogoutResponse,
-        UserResponse,
         MeResponse,
         CreateTransferRequest,
+        TransferRecipientRequest,
         TransferResponse,
+        TransferLegResponse,
         FeedItem,
         FeedListResponse,
         FeedEvent,

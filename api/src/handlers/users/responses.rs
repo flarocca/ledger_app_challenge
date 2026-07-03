@@ -1,19 +1,6 @@
+use crate::models::{AuthenticatedUser, Money};
 use serde::Serialize;
 use utoipa::ToSchema;
-
-use crate::models::{AuthenticatedUser, Money};
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct UserResponse {
-    pub user_id: i64,
-    pub username: String,
-}
-
-impl From<AuthenticatedUser> for UserResponse {
-    fn from(u: AuthenticatedUser) -> Self {
-        Self { user_id: u.user.id, username: u.user.username }
-    }
-}
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MeResponse {

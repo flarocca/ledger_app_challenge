@@ -1,11 +1,9 @@
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
+use crate::repositories::entities::CurrencyEntity;
 use async_trait::async_trait;
 use sqlx::PgPool;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use thiserror::Error;
-
-use crate::repositories::entities::CurrencyEntity;
 
 #[derive(Debug, Error)]
 pub enum CurrenciesRepositoryError {
@@ -62,7 +60,11 @@ pub struct CachedCurrenciesRepository {
 
 impl CachedCurrenciesRepository {
     pub fn new(inner: Arc<dyn CurrenciesRepository>, ttl: Duration) -> Self {
-        Self { inner, cache: Mutex::new(None), ttl }
+        Self {
+            inner,
+            cache: Mutex::new(None),
+            ttl,
+        }
     }
 }
 
@@ -72,17 +74,20 @@ impl CurrenciesRepository for CachedCurrenciesRepository {
     async fn list_all(&self) -> Result<Vec<CurrencyEntity>, CurrenciesRepositoryError> {
         {
             let guard = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(snapshot) = guard.as_ref() {
-                if snapshot.inserted_at.elapsed() < self.ttl {
-                    return Ok(snapshot.list.clone());
-                }
+            if let Some(snapshot) = guard.as_ref()
+                && snapshot.inserted_at.elapsed() < self.ttl
+            {
+                return Ok(snapshot.list.clone());
             }
         }
 
         let list = self.inner.list_all().await?;
 
         let mut guard = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        *guard = Some(CacheSnapshot { list: list.clone(), inserted_at: Instant::now() });
+        *guard = Some(CacheSnapshot {
+            list: list.clone(),
+            inserted_at: Instant::now(),
+        });
         Ok(list)
     }
 }

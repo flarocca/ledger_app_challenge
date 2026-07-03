@@ -19,12 +19,15 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 pub fn init() -> anyhow::Result<()> {
     let log_path = std::env::var("LOG_FILE_PATH").unwrap_or_else(|_| "logs/ledger-api.log".into());
-    if let Some(parent) = std::path::Path::new(&log_path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = std::path::Path::new(&log_path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
     }
-    let file = OpenOptions::new().create(true).append(true).open(&log_path)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
     let file_writer = Mutex::new(file);
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -68,7 +71,8 @@ struct FieldVisitor<'a>(&'a mut BTreeMap<&'static str, Value>);
 
 impl Visit for FieldVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.0.insert(field.name(), Value::String(value.to_string()));
+        self.0
+            .insert(field.name(), Value::String(value.to_string()));
     }
     fn record_bool(&mut self, field: &Field, value: bool) {
         self.0.insert(field.name(), Value::Bool(value));
@@ -83,7 +87,8 @@ impl Visit for FieldVisitor<'_> {
         self.0.insert(field.name(), Value::from(value));
     }
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        self.0.insert(field.name(), Value::String(format!("{value:?}")));
+        self.0
+            .insert(field.name(), Value::String(format!("{value:?}")));
     }
 }
 
@@ -108,7 +113,10 @@ where
             Value::String(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
         );
         entry.insert("level".into(), Value::String(metadata.level().to_string()));
-        entry.insert("target".into(), Value::String(metadata.target().to_string()));
+        entry.insert(
+            "target".into(),
+            Value::String(metadata.target().to_string()),
+        );
 
         let mut event_fields: BTreeMap<&'static str, Value> = BTreeMap::new();
         event.record(&mut FieldVisitor(&mut event_fields));
@@ -133,17 +141,13 @@ where
                 }
             }
         }
-        entry.insert(
-            "request_id".into(),
-            request_id.unwrap_or(Value::Null),
-        );
+        entry.insert("request_id".into(), request_id.unwrap_or(Value::Null));
 
         for (key, value) in event_fields {
             entry.insert(key.to_string(), value);
         }
 
-        let serialized = serde_json::to_string(&Value::Object(entry))
-            .map_err(|_| fmt::Error)?;
+        let serialized = serde_json::to_string(&Value::Object(entry)).map_err(|_| fmt::Error)?;
         writeln!(writer, "{serialized}")
     }
 }

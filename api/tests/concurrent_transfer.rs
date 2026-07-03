@@ -34,8 +34,9 @@ async fn one_hundred_concurrent_transfers_preserve_invariants() {
             c.post(format!("{url}/transfers"))
                 .header("x-request-id", Uuid::new_v4().to_string())
                 .json(&serde_json::json!({
-                    "recipient_username": "bob",
-                    "amount": amount_decimal,
+                    "recipients": [
+                        { "recipient_username": "bob", "amount": amount_decimal }
+                    ],
                     "currency": "USD",
                 }))
                 .send()

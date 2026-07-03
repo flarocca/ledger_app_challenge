@@ -1,9 +1,8 @@
+use crate::models::{AuthenticatedUser, Session};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
-
-use crate::models::{AuthenticatedUser, Session};
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LoginResponse {

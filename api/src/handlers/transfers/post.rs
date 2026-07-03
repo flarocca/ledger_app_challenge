@@ -1,16 +1,15 @@
-use axum::Extension;
-use axum::extract::State;
-use axum::response::IntoResponse;
-use validator::Validate;
-
 use crate::error::ApiError;
 use crate::handlers::transfers::requests::CreateTransferRequest;
 use crate::handlers::transfers::responses::TransferResponse;
 use crate::middlewares::authentication::AuthContext;
 use crate::middlewares::correlation_id::RequestId;
-use crate::models::{Money, TransferCommand};
+use crate::models::{Money, TransferCommand, TransferRecipient};
 use crate::response::ApiResponse;
 use crate::state::AppState;
+use axum::Extension;
+use axum::extract::State;
+use axum::response::IntoResponse;
+use validator::Validate;
 
 #[utoipa::path(
     post,
@@ -22,15 +21,14 @@ use crate::state::AppState;
         (status = 400, description = "Malformed request (validation, decimal parse)"),
         (status = 401, description = "Unauthorized"),
         (status = 404, description = "Recipient not found"),
-        (status = 422, description = "Business constraint violated (insufficient funds, self-transfer, currency mismatch, unsupported currency)"),
+        (status = 422, description = "Business constraint violated (insufficient funds, self-transfer, duplicate recipient, currency mismatch, unsupported currency)"),
     )
 )]
 #[tracing::instrument(
     skip_all,
     fields(
         user_id = auth.user.user.id,
-        recipient_username = %req.recipient_username,
-        amount = %req.amount,
+        recipient_count = req.recipients.len(),
         currency = %req.currency,
     )
 )]
@@ -43,13 +41,21 @@ pub async fn create(
     req.validate()?;
 
     let currency = state.currencies.require(&req.currency).await?;
-    let amount = Money::from_decimal_str(&req.amount, currency)?;
+
+    let mut recipients = Vec::with_capacity(req.recipients.len());
+    for entry in req.recipients {
+        let amount = Money::from_decimal_str(&entry.amount, currency.clone())?;
+        recipients.push(TransferRecipient {
+            username: entry.recipient_username,
+            amount,
+        });
+    }
 
     let cmd = TransferCommand {
         sender_user_id: auth.user.user.id,
         sender_account_id: auth.user.account.id,
-        recipient_username: req.recipient_username.clone(),
-        amount,
+        recipients,
+        currency,
         request_id,
         session_id: auth.session.id,
     };

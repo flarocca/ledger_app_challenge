@@ -24,7 +24,6 @@ pub fn build_router(state: AppState) -> Router {
     let private = Router::new()
         .route("/auth/logout", post(auth_post::logout))
         .route("/users/me", get(users_get::me))
-        .route("/users/search", get(users_get::search))
         .route("/transfers", post(transfers_post::create))
         .route("/feed", get(feed_get::list))
         .route("/feed/stream", get(feed_stream::stream))

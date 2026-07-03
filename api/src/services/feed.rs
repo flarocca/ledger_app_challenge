@@ -49,6 +49,7 @@ impl FeedService for FeedServiceImpl {
         for e in entities {
             let currency = self.currencies.require(&e.currency_code).await?;
             out.push(FeedEntry {
+                action_id: e.action_id,
                 operation_id: e.operation_id,
                 sender_username: e.sender_username,
                 recipient_username: e.recipient_username,

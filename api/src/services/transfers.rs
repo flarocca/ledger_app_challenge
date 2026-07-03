@@ -1,10 +1,14 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::broadcaster::FeedBroadcaster;
-use crate::models::{AuthenticatedUser, Money, TransferCommand, TransferResult};
+use crate::broadcaster::{FeedBroadcaster, FeedEvent};
+use crate::models::{
+    AuthenticatedUser, Money, TransferCommand, TransferLeg, TransferRecipient, TransferResult,
+};
+use crate::repositories::entities::TransferOutcomeEntity;
 use crate::repositories::transfers::{TransfersRepository, TransfersRepositoryError};
 use crate::repositories::users::{UsersRepository, UsersRepositoryError};
 
@@ -15,6 +19,12 @@ pub enum TransfersServiceError {
 
     #[error("recipient '{0}' not found")]
     RecipientNotFound(String),
+
+    #[error("at least one recipient is required")]
+    NoRecipients,
+
+    #[error("recipient '{0}' appears more than once in the same transfer")]
+    DuplicateRecipient(String),
 
     #[error("cannot transfer to self")]
     SelfTransfer,
@@ -47,6 +57,8 @@ impl From<TransfersRepositoryError> for TransfersServiceError {
         match err {
             R::InvalidAmount => Self::InvariantViolation("amount must be positive".into()),
             R::SelfTransfer => Self::SelfTransfer,
+            R::DuplicateRecipient => Self::DuplicateRecipient("(unknown)".into()),
+            R::NoRecipients => Self::NoRecipients,
             R::SystemAccountNotAllowed => Self::SystemAccountNotAllowed,
             R::AccountNotFoundSender => Self::SenderNotFound(0),
             R::AccountNotFoundRecipient => Self::RecipientNotFound(String::from("(unknown)")),
@@ -61,7 +73,8 @@ impl From<TransfersRepositoryError> for TransfersServiceError {
 
 #[async_trait]
 pub trait TransfersService: Send + Sync {
-    async fn transfer(&self, cmd: TransferCommand) -> Result<TransferResult, TransfersServiceError>;
+    async fn transfer(&self, cmd: TransferCommand)
+    -> Result<TransferResult, TransfersServiceError>;
 }
 
 pub struct TransfersServiceImpl {
@@ -76,7 +89,143 @@ impl TransfersServiceImpl {
         users: Arc<dyn UsersRepository>,
         broadcaster: Arc<FeedBroadcaster>,
     ) -> Self {
-        Self { transfers, users, broadcaster }
+        Self {
+            transfers,
+            users,
+            broadcaster,
+        }
+    }
+}
+
+struct ResolvedRecipient {
+    username: String,
+    account_id: i64,
+    amount: Money,
+}
+
+impl TransfersServiceImpl {
+    async fn load_sender(
+        &self,
+        sender_user_id: i64,
+    ) -> Result<AuthenticatedUser, TransfersServiceError> {
+        self.users
+            .find_by_id(sender_user_id)
+            .await?
+            .ok_or(TransfersServiceError::SenderNotFound(sender_user_id))
+            .map(Into::into)
+    }
+
+    fn validate_recipients(
+        sender: &AuthenticatedUser,
+        recipients: &[TransferRecipient],
+        currency_code: &str,
+    ) -> Result<(), TransfersServiceError> {
+        let mut seen = HashSet::with_capacity(recipients.len());
+        for r in recipients {
+            if r.username == sender.user.username {
+                return Err(TransfersServiceError::SelfTransfer);
+            }
+            if !seen.insert(r.username.as_str()) {
+                return Err(TransfersServiceError::DuplicateRecipient(
+                    r.username.clone(),
+                ));
+            }
+            if r.amount.currency.code != currency_code {
+                return Err(TransfersServiceError::CurrencyMismatch);
+            }
+        }
+        Ok(())
+    }
+
+    async fn resolve_recipients(
+        &self,
+        recipients: Vec<TransferRecipient>,
+        currency_code: &str,
+    ) -> Result<Vec<ResolvedRecipient>, TransfersServiceError> {
+        let mut resolved = Vec::with_capacity(recipients.len());
+        for TransferRecipient { username, amount } in recipients {
+            let account = self
+                .transfers
+                .find_recipient_account(&username)
+                .await?
+                .ok_or_else(|| TransfersServiceError::RecipientNotFound(username.clone()))?;
+            if account.currency_code != currency_code {
+                return Err(TransfersServiceError::CurrencyMismatch);
+            }
+            resolved.push(ResolvedRecipient {
+                username,
+                account_id: account.account_id,
+                amount,
+            });
+        }
+        Ok(resolved)
+    }
+
+    async fn execute_ledger(
+        &self,
+        sender: &AuthenticatedUser,
+        resolved: &[ResolvedRecipient],
+        currency_code: &str,
+        request_id: uuid::Uuid,
+        session_id: uuid::Uuid,
+        sender_user_id: i64,
+    ) -> Result<TransferOutcomeEntity, TransfersServiceError> {
+        let recipient_account_ids: Vec<i64> = resolved.iter().map(|r| r.account_id).collect();
+        let amounts: Vec<i64> = resolved.iter().map(|r| r.amount.minor_units).collect();
+        let outcome = self
+            .transfers
+            .execute_transfer(
+                sender.account.id,
+                &recipient_account_ids,
+                &amounts,
+                currency_code,
+                request_id,
+                session_id,
+                sender_user_id,
+            )
+            .await?;
+        Ok(outcome)
+    }
+
+    fn assemble_legs(
+        resolved: Vec<ResolvedRecipient>,
+        outcome: &TransferOutcomeEntity,
+    ) -> Result<Vec<TransferLeg>, TransfersServiceError> {
+        resolved
+            .into_iter()
+            .map(|r| {
+                let action_id = outcome
+                    .legs
+                    .iter()
+                    .find(|leg| leg.recipient_account_id == r.account_id)
+                    .map(|leg| leg.action_id)
+                    .ok_or_else(|| {
+                        TransfersServiceError::Ledger(format!(
+                            "missing action id for {}",
+                            r.username
+                        ))
+                    })?;
+                Ok(TransferLeg {
+                    action_id,
+                    recipient_username: r.username,
+                    amount: r.amount,
+                })
+            })
+            .collect()
+    }
+
+    fn broadcast_legs(&self, result: &TransferResult) {
+        for leg in &result.legs {
+            self.broadcaster.publish(FeedEvent {
+                id: leg.action_id,
+                operation_id: result.operation_id,
+                sender_username: result.sender_username.clone(),
+                recipient_username: leg.recipient_username.clone(),
+                amount: leg.amount.to_decimal_string(),
+                currency: result.currency.code.clone(),
+                created_at: result.created_at,
+            });
+        }
     }
 }
 
@@ -86,60 +235,53 @@ impl TransfersService for TransfersServiceImpl {
         skip_all,
         fields(
             sender_user_id = cmd.sender_user_id,
-            recipient_username = %cmd.recipient_username,
-            amount = %cmd.amount.to_decimal_string(),
-            currency = %cmd.amount.currency.code,
+            recipient_count = cmd.recipients.len(),
+            currency = %cmd.currency.code,
         )
     )]
-    async fn transfer(&self, cmd: TransferCommand) -> Result<TransferResult, TransfersServiceError> {
-        let sender: AuthenticatedUser = self
-            .users
-            .find_by_id(cmd.sender_user_id)
-            .await?
-            .ok_or(TransfersServiceError::SenderNotFound(cmd.sender_user_id))?
-            .into();
+    async fn transfer(
+        &self,
+        cmd: TransferCommand,
+    ) -> Result<TransferResult, TransfersServiceError> {
+        let TransferCommand {
+            sender_user_id,
+            sender_account_id: _,
+            recipients,
+            currency,
+            request_id,
+            session_id,
+        } = cmd;
 
-        if sender.user.username == cmd.recipient_username {
-            return Err(TransfersServiceError::SelfTransfer);
+        if recipients.is_empty() {
+            return Err(TransfersServiceError::NoRecipients);
         }
 
-        let recipient = self
-            .transfers
-            .find_recipient_account(&cmd.recipient_username)
-            .await?
-            .ok_or_else(|| TransfersServiceError::RecipientNotFound(cmd.recipient_username.clone()))?;
+        let sender = self.load_sender(sender_user_id).await?;
+        Self::validate_recipients(&sender, &recipients, &currency.code)?;
 
-        if recipient.currency_code != cmd.amount.currency.code {
-            return Err(TransfersServiceError::CurrencyMismatch);
-        }
-
+        let resolved = self.resolve_recipients(recipients, &currency.code).await?;
         let outcome = self
-            .transfers
-            .execute_transfer(
-                sender.account.id,
-                recipient.account_id,
-                cmd.amount.minor_units,
-                &cmd.amount.currency.code,
-                cmd.request_id,
-                cmd.session_id,
-                cmd.sender_user_id,
+            .execute_ledger(
+                &sender,
+                &resolved,
+                &currency.code,
+                request_id,
+                session_id,
+                sender_user_id,
             )
             .await?;
-
-        let sender_balance = Money::new(outcome.sender_balance_minor_units, cmd.amount.currency.clone());
-        let recipient_balance = Money::new(outcome.recipient_balance_minor_units, cmd.amount.currency.clone());
+        let legs = Self::assemble_legs(resolved, &outcome)?;
 
         let result = TransferResult {
             operation_id: outcome.operation_id,
-            amount: cmd.amount.clone(),
-            sender_balance,
-            recipient_balance,
-            sender_username: sender.user.username.clone(),
-            recipient_username: cmd.recipient_username.clone(),
+            sender_username: sender.user.username,
+            sender_balance: Money::new(outcome.sender_balance_minor_units, currency.clone()),
+            currency,
+            legs,
             created_at: outcome.created_at,
         };
 
-        self.broadcaster.publish((&result).into());
+        self.broadcast_legs(&result);
 
         Ok(result)
     }

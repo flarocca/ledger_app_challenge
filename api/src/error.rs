@@ -1,14 +1,13 @@
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use serde::Serialize;
-use thiserror::Error;
-use utoipa::ToSchema;
-
 use crate::services::auth::AuthServiceError;
 use crate::services::currencies::CurrenciesServiceError;
 use crate::services::feed::FeedServiceError;
 use crate::services::transfers::TransfersServiceError;
 use crate::services::users::UsersServiceError;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use serde::Serialize;
+use thiserror::Error;
+use utoipa::ToSchema;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -102,9 +101,7 @@ impl From<crate::models::MoneyError> for ApiError {
 impl From<UsersServiceError> for ApiError {
     fn from(err: UsersServiceError) -> Self {
         match err {
-            UsersServiceError::UserNotFound(_) | UsersServiceError::AccountNotFound(_) => {
-                ApiError::NotFound(err.to_string())
-            }
+            UsersServiceError::AccountNotFound(_) => ApiError::NotFound(err.to_string()),
             UsersServiceError::Repository(_) => ApiError::Internal(anyhow::anyhow!(err)),
         }
     }
@@ -126,7 +123,9 @@ impl From<AuthServiceError> for ApiError {
 impl From<CurrenciesServiceError> for ApiError {
     fn from(err: CurrenciesServiceError) -> Self {
         match err {
-            CurrenciesServiceError::UnsupportedCurrency(_) => ApiError::Unprocessable(err.to_string()),
+            CurrenciesServiceError::UnsupportedCurrency(_) => {
+                ApiError::Unprocessable(err.to_string())
+            }
             CurrenciesServiceError::Repository(_) => ApiError::Internal(anyhow::anyhow!(err)),
         }
     }
@@ -136,9 +135,11 @@ impl From<TransfersServiceError> for ApiError {
     fn from(err: TransfersServiceError) -> Self {
         use TransfersServiceError as E;
         match err {
-            E::SelfTransfer | E::CurrencyMismatch | E::InsufficientFunds => {
-                ApiError::Unprocessable(err.to_string())
-            }
+            E::SelfTransfer
+            | E::CurrencyMismatch
+            | E::InsufficientFunds
+            | E::DuplicateRecipient(_)
+            | E::NoRecipients => ApiError::Unprocessable(err.to_string()),
             E::RecipientNotFound(_) => ApiError::NotFound(err.to_string()),
             E::SenderNotFound(_) => ApiError::Unauthorized,
             E::SystemAccountNotAllowed => ApiError::Forbidden(err.to_string()),

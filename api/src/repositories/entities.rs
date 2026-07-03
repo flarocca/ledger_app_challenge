@@ -38,15 +38,22 @@ pub struct CurrencyEntity {
 }
 
 #[derive(Clone, Debug)]
+pub struct TransferLegOutcomeEntity {
+    pub recipient_account_id: i64,
+    pub action_id: i64,
+}
+
+#[derive(Clone, Debug)]
 pub struct TransferOutcomeEntity {
     pub operation_id: Uuid,
     pub sender_balance_minor_units: i64,
-    pub recipient_balance_minor_units: i64,
     pub created_at: DateTime<Utc>,
+    pub legs: Vec<TransferLegOutcomeEntity>,
 }
 
 #[derive(Clone, Debug)]
 pub struct FeedActionEntity {
+    pub action_id: i64,
     pub operation_id: Uuid,
     pub sender_username: String,
     pub recipient_username: String,

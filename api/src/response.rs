@@ -1,9 +1,8 @@
+use crate::error::ErrorDetail;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
-
-use crate::error::ErrorDetail;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct Pagination {
@@ -45,7 +44,11 @@ impl<T: Serialize> ApiResponse<T> {
         }
     }
 
-    pub fn error(detail: ErrorDetail, pagination: Option<Pagination>, request_id: Option<Uuid>) -> Self {
+    pub fn error(
+        detail: ErrorDetail,
+        pagination: Option<Pagination>,
+        request_id: Option<Uuid>,
+    ) -> Self {
         Self {
             result: None,
             pagination,

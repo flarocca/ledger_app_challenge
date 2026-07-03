@@ -9,22 +9,29 @@ import {
   formatMoney,
   MeResponse,
   newRequestId,
+  TransferRecipientInput,
   TransferResult,
 } from "@/lib/api";
 import { openFeedStream, FeedEvent } from "@/lib/feedStream";
+import { isRecentDuplicate, recordTransfer } from "@/lib/recentTransfers";
+
+type RecipientRow = { username: string; amount: string };
+
+const emptyRow = (): RecipientRow => ({ username: "", amount: "" });
 
 export default function HomePage() {
   const router = useRouter();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [items, setItems] = useState<FeedItem[]>([]);
-  const [highlighted, setHighlighted] = useState<string | null>(null);
-  const [recipient, setRecipient] = useState("");
-  const [amount, setAmount] = useState("");
+  const [highlighted, setHighlighted] = useState<number | null>(null);
+  const [rows, setRows] = useState<RecipientRow[]>([emptyRow()]);
   const [requestId, setRequestId] = useState<string>(() => newRequestId());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const seen = useRef<Set<string>>(new Set());
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const seen = useRef<Set<number>>(new Set());
+  const inFlight = useRef(false);
 
   const loadMe = useCallback(async () => {
     try {
@@ -39,12 +46,7 @@ export default function HomePage() {
     try {
       const data = await api<{ items: FeedItem[] }>("/feed");
       setItems(data.items);
-      seen.current = new Set(
-        data.items.map(
-          (it) =>
-            `${it.created_at}|${it.sender_username}|${it.recipient_username}|${it.amount}`,
-        ),
-      );
+      seen.current = new Set(data.items.map((it) => it.id));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) router.replace("/login");
     }
@@ -57,11 +59,12 @@ export default function HomePage() {
 
   useEffect(() => {
     const close = openFeedStream((ev: FeedEvent) => {
-      const key = `${ev.created_at}|${ev.sender_username}|${ev.recipient_username}|${ev.amount}`;
-      if (seen.current.has(key)) return;
-      seen.current.add(key);
+      if (seen.current.has(ev.id)) return;
+      seen.current.add(ev.id);
       setItems((prev) => [
         {
+          id: ev.id,
+          operation_id: ev.operation_id,
           sender_username: ev.sender_username,
           recipient_username: ev.recipient_username,
           amount: ev.amount,
@@ -70,42 +73,87 @@ export default function HomePage() {
         },
         ...prev,
       ]);
-      setHighlighted(ev.operation_id);
+      setHighlighted(ev.id);
       void loadMe();
     });
     return close;
   }, [loadMe]);
 
+  function updateRow(idx: number, patch: Partial<RecipientRow>) {
+    setDuplicateWarning(null);
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+
+  function addRow() {
+    setDuplicateWarning(null);
+    setRows((prev) => [...prev, emptyRow()]);
+  }
+
+  function removeRow(idx: number) {
+    setDuplicateWarning(null);
+    setRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== idx)));
+  }
+
   async function send(e: React.FormEvent) {
     e.preventDefault();
+    // Synchronous guard against rapid double-clicks / Enter-key resubmits:
+    // React commits `setBusy(true)` on the next render, so the `disabled` prop
+    // on the submit button isn't in the DOM yet when the second event fires.
+    if (inFlight.current) return;
+
+    const recipients: TransferRecipientInput[] = rows.map((r) => ({
+      recipient_username: r.username.trim(),
+      amount: r.amount.trim(),
+    }));
+
+    if (recipients.some((r) => !r.recipient_username || !r.amount)) {
+      setError("Every recipient needs a username and an amount");
+      return;
+    }
+    const usernames = recipients.map((r) => r.recipient_username);
+    if (new Set(usernames).size !== usernames.length) {
+      setError("Each recipient can only appear once per transfer");
+      return;
+    }
+
+    const currency = "USD";
+
+    // Warn once if the exact same transfer went out in the last 5 minutes.
+    // A repeat click on the button after the warning shows counts as
+    // acknowledgement and sends through.
+    if (!duplicateWarning && isRecentDuplicate(recipients, currency)) {
+      setError(null);
+      setInfo(null);
+      setDuplicateWarning(
+        "This looks like the same transfer you just sent. Click \"Send anyway\" to confirm.",
+      );
+      return;
+    }
+
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     setInfo(null);
-    if (!amount.trim()) {
-      setError("Enter an amount");
-      setBusy(false);
-      return;
-    }
+
     try {
       const result = await api<TransferResult>("/transfers", {
         method: "POST",
         idempotencyKey: requestId,
-        body: {
-          recipient_username: recipient,
-          amount: amount.trim(),
-          currency: "USD",
-        },
+        body: { recipients, currency },
       });
-      setInfo(
-        `Sent ${formatMoney(result.amount, result.currency)} to ${result.recipient_username}`,
-      );
-      setRecipient("");
-      setAmount("");
+      recordTransfer(recipients, currency);
+      const summary = result.transfers
+        .map((t) => `${formatMoney(t.amount, result.currency)} → ${t.recipient_username}`)
+        .join(", ");
+      setInfo(`Sent ${summary}`);
+      setRows([emptyRow()]);
       setRequestId(newRequestId());
+      setDuplicateWarning(null);
       void loadMe();
     } catch (err) {
       setError((err as Error).message || "Transfer failed");
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -122,7 +170,13 @@ export default function HomePage() {
   return (
     <div className="shell">
       <div className="panel">
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
           <div>
             <div className="muted">Signed in as</div>
             <div className="h1">{me?.username || "…"}</div>
@@ -130,7 +184,12 @@ export default function HomePage() {
               {me ? formatMoney(me.balance, me.currency) : "—"}
             </div>
           </div>
-          <button className="linkish" onClick={logout}>
+          <button
+            type="button"
+            className="linkish"
+            onClick={logout}
+            style={{ padding: "8px 12px" }}
+          >
             Log out
           </button>
         </div>
@@ -139,30 +198,55 @@ export default function HomePage() {
       <div className="panel">
         <div className="h1">Send money</div>
         <form onSubmit={send}>
+          {rows.map((row, idx) => (
+            <div className="row" key={idx}>
+              <div className="field" style={{ flex: 2 }}>
+                <label className="label">Recipient username</label>
+                <input
+                  type="text"
+                  value={row.username}
+                  onChange={(e) => updateRow(idx, { username: e.target.value })}
+                  placeholder="e.g. bob"
+                />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label className="label">Amount (USD)</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={row.amount}
+                  onChange={(e) => updateRow(idx, { amount: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
+              {rows.length > 1 && (
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() => removeRow(idx)}
+                  aria-label={`Remove recipient ${idx + 1}`}
+                  style={{ alignSelf: "flex-end" }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
           <div className="row">
-            <div className="field" style={{ flex: 2 }}>
-              <label className="label">Recipient username</label>
-              <input
-                type="text"
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-                placeholder="e.g. bob"
-              />
-            </div>
-            <div className="field" style={{ flex: 1 }}>
-              <label className="label">Amount (USD)</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
+            <button type="button" className="linkish" onClick={addRow}>
+              + Add recipient
+            </button>
           </div>
           <button type="submit" disabled={busy}>
-            {busy ? "Sending…" : "Send"}
+            {busy
+              ? "Sending…"
+              : duplicateWarning
+                ? "Send anyway"
+                : rows.length > 1
+                  ? `Send to ${rows.length} recipients`
+                  : "Send"}
           </button>
+          {duplicateWarning && <div className="warning">{duplicateWarning}</div>}
           {error && <div className="error">{error}</div>}
           {info && <div className="success">{info}</div>}
         </form>
@@ -173,10 +257,10 @@ export default function HomePage() {
         {items.length === 0 && (
           <div className="muted">No transfers yet. Send one!</div>
         )}
-        {items.map((it, idx) => (
+        {items.map((it) => (
           <div
-            key={`${it.created_at}-${idx}`}
-            className={`feed-item${highlighted && idx === 0 ? " new" : ""}`}
+            key={it.id}
+            className={`feed-item${highlighted === it.id ? " new" : ""}`}
           >
             <div>
               <strong>{it.sender_username}</strong>

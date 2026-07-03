@@ -8,6 +8,7 @@
   --accent-strong: #4f7bff;
   --danger: #ff7a7a;
   --success: #66d9a4;
+  --warning: #ffb454;
 }
 
 * {
@@ -106,6 +107,15 @@ button:disabled {
 .success {
   color: var(--success);
   margin-top: 8px;
+}
+
+.warning {
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  background: rgba(255, 180, 84, 0.08);
 }
 
 .feed-item {

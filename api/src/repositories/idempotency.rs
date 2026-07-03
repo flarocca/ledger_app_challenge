@@ -1,54 +1,64 @@
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-
+use crate::repositories::entities::IdempotencyEntryEntity;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-use crate::repositories::entities::IdempotencyEntryEntity;
+pub enum AcquireOutcome {
+    Cached(IdempotencyEntryEntity),
+    Reserved,
+    InProgress,
+}
 
 #[async_trait]
 pub trait IdempotencyRepository: Send + Sync {
-    async fn get(
+    async fn acquire(
         &self,
         request_id: Uuid,
         session_id: Uuid,
         now: DateTime<Utc>,
-    ) -> Option<IdempotencyEntryEntity>;
+    ) -> AcquireOutcome;
 
-    async fn put(
-        &self,
-        request_id: Uuid,
-        session_id: Uuid,
-        entry: IdempotencyEntryEntity,
-    );
+    async fn put(&self, request_id: Uuid, session_id: Uuid, entry: IdempotencyEntryEntity);
+
+    async fn release(&self, request_id: Uuid, session_id: Uuid);
+}
+
+enum Slot {
+    Pending,
+    Complete(IdempotencyEntryEntity),
 }
 
 pub struct InMemoryIdempotencyRepository {
-    cache: DashMap<(Uuid, Uuid), IdempotencyEntryEntity>,
-    sweep_interval: Duration,
-    last_sweep: Mutex<Instant>,
+    cache: DashMap<(Uuid, Uuid), Slot>,
+    eviction_interval: Duration,
+    last_eviction: Mutex<Instant>,
 }
 
 impl InMemoryIdempotencyRepository {
     pub fn new() -> Self {
         Self {
             cache: DashMap::new(),
-            sweep_interval: Duration::from_secs(60),
-            last_sweep: Mutex::new(Instant::now()),
+            eviction_interval: Duration::from_secs(60),
+            last_eviction: Mutex::new(Instant::now()),
         }
     }
 
-    fn maybe_sweep(&self, now: DateTime<Utc>) {
-        let mut last = match self.last_sweep.lock() {
+    fn evict_expired(&self, now: DateTime<Utc>) {
+        let mut last = match self.last_eviction.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        if last.elapsed() < self.sweep_interval {
+        if last.elapsed() < self.eviction_interval {
             return;
         }
-        self.cache.retain(|_, entry| entry.expires_at > now);
+        self.cache.retain(|_, slot| match slot {
+            Slot::Complete(entry) => entry.expires_at > now,
+            Slot::Pending => true,
+        });
         *last = Instant::now();
     }
 }
@@ -61,26 +71,46 @@ impl Default for InMemoryIdempotencyRepository {
 
 #[async_trait]
 impl IdempotencyRepository for InMemoryIdempotencyRepository {
-    async fn get(
+    async fn acquire(
         &self,
         request_id: Uuid,
         session_id: Uuid,
         now: DateTime<Utc>,
-    ) -> Option<IdempotencyEntryEntity> {
+    ) -> AcquireOutcome {
         let key = (request_id, session_id);
-        let hit = self.cache.get(&key).and_then(|e| {
-            (e.expires_at > now).then(|| e.clone())
-        });
-        self.maybe_sweep(now);
-        hit
+
+        let outcome = match self.cache.entry(key) {
+            Entry::Occupied(mut occ) => {
+                let outcome = match occ.get() {
+                    Slot::Complete(e) if e.expires_at > now => AcquireOutcome::Cached(e.clone()),
+                    Slot::Complete(_) => AcquireOutcome::Reserved,
+                    Slot::Pending => AcquireOutcome::InProgress,
+                };
+                if matches!(outcome, AcquireOutcome::Reserved) {
+                    occ.insert(Slot::Pending);
+                }
+                outcome
+            }
+            Entry::Vacant(vac) => {
+                vac.insert(Slot::Pending);
+                AcquireOutcome::Reserved
+            }
+        };
+        self.evict_expired(now);
+        outcome
     }
 
-    async fn put(
-        &self,
-        request_id: Uuid,
-        session_id: Uuid,
-        entry: IdempotencyEntryEntity,
-    ) {
-        self.cache.insert((request_id, session_id), entry);
+    async fn put(&self, request_id: Uuid, session_id: Uuid, entry: IdempotencyEntryEntity) {
+        if let Entry::Occupied(mut occ) = self.cache.entry((request_id, session_id))
+            && matches!(occ.get(), Slot::Pending)
+        {
+            occ.insert(Slot::Complete(entry));
+        }
+    }
+
+    async fn release(&self, request_id: Uuid, session_id: Uuid) {
+        self.cache.remove_if(&(request_id, session_id), |_, slot| {
+            matches!(slot, Slot::Pending)
+        });
     }
 }

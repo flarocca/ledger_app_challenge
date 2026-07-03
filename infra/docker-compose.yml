@@ -1,9 +1,15 @@
 name: ledger
 
+# Profiles:
+#   infra → postgres, loki, grafana, promtail
+#   app   → everything in infra plus the API and the web app
+# Pick one with `docker compose --profile <name> up -d`.
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: ledger-postgres
+    profiles: ["infra", "app"]
     environment:
       POSTGRES_DB: ledger
       POSTGRES_USER: ledger
@@ -21,6 +27,7 @@ services:
   loki:
     image: grafana/loki:3.0.0
     container_name: ledger-loki
+    profiles: ["infra", "app"]
     command: -config.file=/etc/loki/config.yml
     ports:
       - "3100:3100"
@@ -31,6 +38,7 @@ services:
   grafana:
     image: grafana/grafana:11.1.0
     container_name: ledger-grafana
+    profiles: ["infra", "app"]
     depends_on:
       - loki
     environment:
@@ -47,12 +55,45 @@ services:
   promtail:
     image: grafana/promtail:3.0.0
     container_name: ledger-promtail
+    profiles: ["infra", "app"]
     depends_on:
       - loki
     command: -config.file=/etc/promtail/config.yml
     volumes:
       - ./promtail/config.yml:/etc/promtail/config.yml:ro
       - ../api/logs:/var/log/ledger:ro
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/api.Dockerfile
+    container_name: ledger-api
+    profiles: ["app"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVER_CONFIG__DATABASE_URL: postgres://ledger:ledger@postgres:5432/ledger
+      SERVER_CONFIG__PORT: "4000"
+      SERVER_CONFIG__CORS_ALLOW_ORIGIN: http://localhost:3000
+      RUST_LOG: ledger_api=info,sqlx=warn
+    ports:
+      - "4000:4000"
+    volumes:
+      - ../api/logs:/app/logs
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/web.Dockerfile
+    container_name: ledger-web
+    profiles: ["app"]
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3000:3000"
 
 volumes:
   postgres-data:

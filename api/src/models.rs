@@ -10,8 +10,6 @@ use uuid::Uuid;
 
 use crate::repositories::entities::{CurrencyEntity, SessionEntity, UserAccountEntity};
 
-// ─── Money ───────────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Currency {
     pub code: String,
@@ -20,13 +18,19 @@ pub struct Currency {
 
 impl Currency {
     pub fn new(code: impl Into<String>, exponent: u8) -> Self {
-        Self { code: code.into(), exponent }
+        Self {
+            code: code.into(),
+            exponent,
+        }
     }
 }
 
 impl From<CurrencyEntity> for Currency {
     fn from(e: CurrencyEntity) -> Self {
-        Self { code: e.code, exponent: e.exponent }
+        Self {
+            code: e.code,
+            exponent: e.exponent,
+        }
     }
 }
 
@@ -50,7 +54,10 @@ pub enum MoneyError {
 
 impl Money {
     pub fn new(minor_units: i64, currency: Currency) -> Self {
-        Self { minor_units, currency }
+        Self {
+            minor_units,
+            currency,
+        }
     }
 
     pub fn from_decimal_str(input: &str, currency: Currency) -> Result<Self, MoneyError> {
@@ -71,7 +78,10 @@ impl Money {
             .ok_or(MoneyError::OutOfRange)?;
         let minor_units = scaled.to_i64().ok_or(MoneyError::OutOfRange)?;
 
-        Ok(Self { minor_units, currency })
+        Ok(Self {
+            minor_units,
+            currency,
+        })
     }
 
     pub fn to_decimal_string(&self) -> String {
@@ -86,8 +96,6 @@ impl fmt::Display for Money {
         write!(f, "{} {}", self.to_decimal_string(), self.currency.code)
     }
 }
-
-// ─── Users ───────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
 pub struct User {
@@ -136,8 +144,6 @@ pub struct Credentials {
     pub password: String,
 }
 
-// ─── Sessions ────────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug)]
 pub struct Session {
     pub id: Uuid,
@@ -151,9 +157,7 @@ pub struct Session {
 
 impl Session {
     pub fn is_active(&self, now: DateTime<Utc>) -> bool {
-        self.revoked_at.is_none()
-            && now < self.rolling_expires_at
-            && now < self.absolute_expires_at
+        self.revoked_at.is_none() && now < self.rolling_expires_at && now < self.absolute_expires_at
     }
 }
 
@@ -171,39 +175,48 @@ impl From<SessionEntity> for Session {
     }
 }
 
-// ─── Transfers ───────────────────────────────────────────────────────────────
+#[derive(Clone, Debug)]
+pub struct TransferRecipient {
+    pub username: String,
+    pub amount: Money,
+}
 
 #[derive(Clone, Debug)]
 pub struct TransferCommand {
     pub sender_user_id: i64,
     pub sender_account_id: i64,
-    pub recipient_username: String,
-    pub amount: Money,
+    pub recipients: Vec<TransferRecipient>,
+    pub currency: Currency,
     pub request_id: Uuid,
     pub session_id: Uuid,
 }
 
 #[derive(Clone, Debug)]
+pub struct TransferLeg {
+    pub action_id: i64,
+    pub recipient_username: String,
+    pub amount: Money,
+}
+
+#[derive(Clone, Debug)]
 pub struct TransferResult {
     pub operation_id: Uuid,
-    pub amount: Money,
-    pub sender_balance: Money,
-    pub recipient_balance: Money,
     pub sender_username: String,
-    pub recipient_username: String,
+    pub sender_balance: Money,
+    pub currency: Currency,
+    pub legs: Vec<TransferLeg>,
     pub created_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug)]
 pub struct FeedEntry {
+    pub action_id: i64,
     pub operation_id: Uuid,
     pub sender_username: String,
     pub recipient_username: String,
     pub amount: Money,
     pub created_at: DateTime<Utc>,
 }
-
-// ─── Idempotency ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
 pub struct CachedResponse {
@@ -219,8 +232,6 @@ pub struct IdempotencyRecord {
     pub cached: CachedResponse,
     pub expires_at: DateTime<Utc>,
 }
-
-// ─── tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -276,13 +287,19 @@ mod tests {
 
     #[test]
     fn formats_with_trailing_zeros() {
-        let m = Money { minor_units: 1200, currency: usd() };
+        let m = Money {
+            minor_units: 1200,
+            currency: usd(),
+        };
         assert_eq!(m.to_decimal_string(), "12.00");
     }
 
     #[test]
     fn formats_arbitrary_amount() {
-        let m = Money { minor_units: 1234567, currency: usd() };
+        let m = Money {
+            minor_units: 1234567,
+            currency: usd(),
+        };
         assert_eq!(m.to_decimal_string(), "12345.67");
     }
 }

@@ -1,13 +1,12 @@
-use axum::Extension;
-use axum::extract::State;
-use axum::response::IntoResponse;
-
 use crate::error::ApiError;
 use crate::handlers::feed::responses::{FeedItem, FeedListResponse};
 use crate::middlewares::authentication::AuthContext;
 use crate::middlewares::correlation_id::RequestId;
 use crate::response::ApiResponse;
 use crate::state::AppState;
+use axum::Extension;
+use axum::extract::State;
+use axum::response::IntoResponse;
 
 #[utoipa::path(
     get,
@@ -24,5 +23,8 @@ pub async fn list(
     let limit = state.config.feed.backfill_size as i64;
     let entries = state.feed.list_recent(limit).await?;
     let items = entries.into_iter().map(FeedItem::from).collect();
-    Ok(axum::Json(ApiResponse::ok(FeedListResponse { items }, Some(request_id))))
+    Ok(axum::Json(ApiResponse::ok(
+        FeedListResponse { items },
+        Some(request_id),
+    )))
 }

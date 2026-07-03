@@ -1,6 +1,7 @@
 import { API_URL, newRequestId } from "./api";
 
 export type FeedEvent = {
+  id: number;
   operation_id: string;
   sender_username: string;
   recipient_username: string;

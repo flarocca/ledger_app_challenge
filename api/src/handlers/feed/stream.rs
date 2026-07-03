@@ -1,16 +1,14 @@
-use std::convert::Infallible;
-use std::time::Duration;
-
+use crate::middlewares::authentication::AuthContext;
+use crate::state::AppState;
 use axum::Extension;
 use axum::extract::State;
 use axum::response::Sse;
 use axum::response::sse::{Event, KeepAlive};
 use futures::Stream;
+use std::convert::Infallible;
+use std::time::Duration;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
-
-use crate::middlewares::authentication::AuthContext;
-use crate::state::AppState;
 
 #[utoipa::path(
     get,
@@ -26,12 +24,16 @@ pub async fn stream(
     let rx = state.feed.subscribe();
     let stream = BroadcastStream::new(rx).filter_map(|msg| match msg {
         Ok(ev) => Some(Ok(Event::default()
-            .id(ev.operation_id.to_string())
+            .id(ev.id.to_string())
             .event("transfer")
             .json_data(ev)
             .unwrap_or_else(|_| Event::default()))),
         Err(_) => None,
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("ping"))
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("ping"),
+    )
 }

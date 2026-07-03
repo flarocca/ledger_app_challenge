@@ -17,7 +17,10 @@ pub enum UsersRepositoryError {
 
 #[async_trait]
 pub trait UsersRepository: Send + Sync {
-    async fn find_by_username(&self, username: &str) -> Result<Option<UserAccountEntity>, UsersRepositoryError>;
+    async fn find_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserAccountEntity>, UsersRepositoryError>;
     async fn find_by_id(&self, id: i64) -> Result<Option<UserAccountEntity>, UsersRepositoryError>;
     async fn get_balance(&self, account_id: i64) -> Result<Option<i64>, UsersRepositoryError>;
 }
@@ -35,7 +38,10 @@ impl PgUsersRepository {
 #[async_trait]
 impl UsersRepository for PgUsersRepository {
     #[tracing::instrument(skip_all, fields(username = %username))]
-    async fn find_by_username(&self, username: &str) -> Result<Option<UserAccountEntity>, UsersRepositoryError> {
+    async fn find_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserAccountEntity>, UsersRepositoryError> {
         let row = sqlx::query!(
             r#"
             SELECT u.id AS user_id, u.username, u.email, u.password_hash, u.is_system,
@@ -138,34 +144,61 @@ impl CachedUsersRepository {
 
 #[async_trait]
 impl UsersRepository for CachedUsersRepository {
-    async fn find_by_username(&self, username: &str) -> Result<Option<UserAccountEntity>, UsersRepositoryError> {
+    async fn find_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserAccountEntity>, UsersRepositoryError> {
         self.maybe_sweep().await;
-        if let Some(e) = self.by_username.get(username) {
-            if self.fresh(&e) {
-                return Ok(Some(e.value.clone()));
-            }
+        if let Some(e) = self.by_username.get(username)
+            && self.fresh(&e)
+        {
+            return Ok(Some(e.value.clone()));
         }
         let fetched = self.inner.find_by_username(username).await?;
         if let Some(u) = &fetched {
             let now = std::time::Instant::now();
-            self.by_username.insert(username.to_string(), CacheEntry { value: u.clone(), inserted_at: now });
-            self.by_id.insert(u.user_id, CacheEntry { value: u.clone(), inserted_at: now });
+            self.by_username.insert(
+                username.to_string(),
+                CacheEntry {
+                    value: u.clone(),
+                    inserted_at: now,
+                },
+            );
+            self.by_id.insert(
+                u.user_id,
+                CacheEntry {
+                    value: u.clone(),
+                    inserted_at: now,
+                },
+            );
         }
         Ok(fetched)
     }
 
     async fn find_by_id(&self, id: i64) -> Result<Option<UserAccountEntity>, UsersRepositoryError> {
         self.maybe_sweep().await;
-        if let Some(e) = self.by_id.get(&id) {
-            if self.fresh(&e) {
-                return Ok(Some(e.value.clone()));
-            }
+        if let Some(e) = self.by_id.get(&id)
+            && self.fresh(&e)
+        {
+            return Ok(Some(e.value.clone()));
         }
         let fetched = self.inner.find_by_id(id).await?;
         if let Some(u) = &fetched {
             let now = std::time::Instant::now();
-            self.by_id.insert(id, CacheEntry { value: u.clone(), inserted_at: now });
-            self.by_username.insert(u.username.clone(), CacheEntry { value: u.clone(), inserted_at: now });
+            self.by_id.insert(
+                id,
+                CacheEntry {
+                    value: u.clone(),
+                    inserted_at: now,
+                },
+            );
+            self.by_username.insert(
+                u.username.clone(),
+                CacheEntry {
+                    value: u.clone(),
+                    inserted_at: now,
+                },
+            );
         }
         Ok(fetched)
     }

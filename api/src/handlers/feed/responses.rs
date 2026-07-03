@@ -1,10 +1,11 @@
+use crate::models::FeedEntry;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::models::FeedEntry;
-
 #[derive(Debug, Serialize, ToSchema)]
 pub struct FeedItem {
+    pub id: i64,
+    pub operation_id: uuid::Uuid,
     pub sender_username: String,
     pub recipient_username: String,
     pub amount: String,
@@ -16,6 +17,8 @@ impl From<FeedEntry> for FeedItem {
     fn from(entry: FeedEntry) -> Self {
         let currency = entry.amount.currency.code.clone();
         Self {
+            id: entry.action_id,
+            operation_id: entry.operation_id,
             sender_username: entry.sender_username,
             recipient_username: entry.recipient_username,
             amount: entry.amount.to_decimal_string(),

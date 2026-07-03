@@ -1,11 +1,3 @@
-use axum::Extension;
-use axum::extract::State;
-use axum::http::HeaderValue;
-use axum::response::{IntoResponse, Response};
-use axum_extra::extract::CookieJar;
-use axum_extra::extract::cookie::{Cookie, SameSite};
-use validator::Validate;
-
 use crate::error::ApiError;
 use crate::handlers::auth::requests::LoginRequest;
 use crate::handlers::auth::responses::{LoginResponse, LogoutResponse};
@@ -13,6 +5,13 @@ use crate::middlewares::authentication::AuthContext;
 use crate::middlewares::correlation_id::RequestId;
 use crate::response::ApiResponse;
 use crate::state::AppState;
+use axum::Extension;
+use axum::extract::State;
+use axum::http::HeaderValue;
+use axum::response::{IntoResponse, Response};
+use axum_extra::extract::CookieJar;
+use axum_extra::extract::cookie::{Cookie, SameSite};
+use validator::Validate;
 
 #[utoipa::path(
     post,
@@ -35,7 +34,10 @@ pub async fn login(
 
     let (user, session) = state.auth.login(req.into()).await?;
 
-    let mut cookie = Cookie::new(state.config.session.cookie_name.clone(), session.id.to_string());
+    let mut cookie = Cookie::new(
+        state.config.session.cookie_name.clone(),
+        session.id.to_string(),
+    );
     cookie.set_http_only(true);
     cookie.set_secure(state.config.session.cookie_secure);
     cookie.set_same_site(SameSite::Lax);
@@ -45,9 +47,10 @@ pub async fn login(
     let body = LoginResponse::from((user, session));
     let envelope = ApiResponse::ok(body, Some(request_id));
     let mut response = axum::Json(envelope).into_response();
-    response
-        .headers_mut()
-        .append(axum::http::header::SET_COOKIE, HeaderValue::from_str(&cookie.to_string()).unwrap());
+    response.headers_mut().append(
+        axum::http::header::SET_COOKIE,
+        HeaderValue::from_str(&cookie.to_string()).unwrap(),
+    );
     let _ = jar;
     Ok(response)
 }
@@ -67,14 +70,17 @@ pub async fn logout(
     state.auth.logout(auth.session.id).await?;
 
     let mut cookie = Cookie::new(state.config.session.cookie_name.clone(), "");
-    cookie.set_path("/");
     cookie.set_http_only(true);
+    cookie.set_secure(state.config.session.cookie_secure);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_path("/");
     cookie.set_max_age(time::Duration::seconds(0));
 
     let envelope = ApiResponse::ok(LogoutResponse { success: true }, Some(request_id));
     let mut response = axum::Json(envelope).into_response();
-    response
-        .headers_mut()
-        .append(axum::http::header::SET_COOKIE, HeaderValue::from_str(&cookie.to_string()).unwrap());
+    response.headers_mut().append(
+        axum::http::header::SET_COOKIE,
+        HeaderValue::from_str(&cookie.to_string()).unwrap(),
+    );
     Ok(response)
 }

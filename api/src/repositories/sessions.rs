@@ -1,14 +1,12 @@
-use std::sync::Arc;
-use std::time::Duration;
-
+use crate::repositories::entities::SessionEntity;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use sqlx::PgPool;
+use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
-
-use crate::repositories::entities::SessionEntity;
 
 #[derive(Debug, Error)]
 pub enum SessionsRepositoryError {
@@ -112,7 +110,9 @@ impl SessionsRepository for PgSessionsRepository {
     ) -> Result<(), SessionsRepositoryError> {
         sqlx::query!(
             r#"UPDATE sessions SET last_activity_at = $2, rolling_expires_at = $3 WHERE id = $1"#,
-            id, last_activity_at, rolling_expires_at
+            id,
+            last_activity_at,
+            rolling_expires_at
         )
         .execute(&self.pool)
         .await?;
@@ -123,7 +123,8 @@ impl SessionsRepository for PgSessionsRepository {
     async fn revoke(&self, id: Uuid, when: DateTime<Utc>) -> Result<(), SessionsRepositoryError> {
         sqlx::query!(
             r#"UPDATE sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL"#,
-            id, when
+            id,
+            when
         )
         .execute(&self.pool)
         .await?;
@@ -144,7 +145,11 @@ pub struct CachedSessionsRepository {
 
 impl CachedSessionsRepository {
     pub fn new(inner: Arc<dyn SessionsRepository>, ttl: Duration) -> Self {
-        Self { inner, cache: DashMap::new(), ttl }
+        Self {
+            inner,
+            cache: DashMap::new(),
+            ttl,
+        }
     }
 }
 
@@ -157,20 +162,35 @@ impl SessionsRepository for CachedSessionsRepository {
         rolling_expires_at: DateTime<Utc>,
         absolute_expires_at: DateTime<Utc>,
     ) -> Result<SessionEntity, SessionsRepositoryError> {
-        let s = self.inner.create(user_id, created_at, rolling_expires_at, absolute_expires_at).await?;
-        self.cache.insert(s.id, CachedSession { entity: s.clone(), inserted_at: std::time::Instant::now() });
+        let s = self
+            .inner
+            .create(user_id, created_at, rolling_expires_at, absolute_expires_at)
+            .await?;
+        self.cache.insert(
+            s.id,
+            CachedSession {
+                entity: s.clone(),
+                inserted_at: std::time::Instant::now(),
+            },
+        );
         Ok(s)
     }
 
     async fn find_by_id(&self, id: Uuid) -> Result<Option<SessionEntity>, SessionsRepositoryError> {
-        if let Some(e) = self.cache.get(&id) {
-            if e.inserted_at.elapsed() < self.ttl {
-                return Ok(Some(e.entity.clone()));
-            }
+        if let Some(e) = self.cache.get(&id)
+            && e.inserted_at.elapsed() < self.ttl
+        {
+            return Ok(Some(e.entity.clone()));
         }
         let fetched = self.inner.find_by_id(id).await?;
         if let Some(s) = &fetched {
-            self.cache.insert(s.id, CachedSession { entity: s.clone(), inserted_at: std::time::Instant::now() });
+            self.cache.insert(
+                s.id,
+                CachedSession {
+                    entity: s.clone(),
+                    inserted_at: std::time::Instant::now(),
+                },
+            );
         }
         Ok(fetched)
     }
@@ -181,7 +201,9 @@ impl SessionsRepository for CachedSessionsRepository {
         last_activity_at: DateTime<Utc>,
         rolling_expires_at: DateTime<Utc>,
     ) -> Result<(), SessionsRepositoryError> {
-        self.inner.touch(id, last_activity_at, rolling_expires_at).await?;
+        self.inner
+            .touch(id, last_activity_at, rolling_expires_at)
+            .await?;
         if let Some(mut e) = self.cache.get_mut(&id) {
             e.entity.last_activity_at = last_activity_at;
             e.entity.rolling_expires_at = rolling_expires_at;

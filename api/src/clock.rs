@@ -20,12 +20,14 @@ pub struct TestClock {
 
 impl TestClock {
     pub fn new(now: DateTime<Utc>) -> Self {
-        Self { now: Arc::new(RwLock::new(now)) }
+        Self {
+            now: Arc::new(RwLock::new(now)),
+        }
     }
 
     pub fn advance(&self, by: Duration) {
         let mut w = self.now.write().unwrap();
-        *w = *w + by;
+        *w += by;
     }
 
     pub fn set(&self, when: DateTime<Utc>) {
